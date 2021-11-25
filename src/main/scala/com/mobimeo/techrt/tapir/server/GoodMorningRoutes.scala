@@ -21,22 +21,22 @@ class GoodMorningRoutes[F[_]: MonadThrow](
     timeService: TimeService[F]
 ) {
 
-  implicit class OurPlainEndpoint[I, E, O](
-      endpoint: tapir.Endpoint[Unit, I, E, O, Any]
+  implicit class OurPlainEndpoint[I, O](
+      endpoint: tapir.Endpoint[Unit, I, Unit, O, Any]
   ) {
     def withLogic(logic: I => F[O]): ServerEndpoint[Any, F] =
-      endpoint.serverLogic(i => logic(i).map[Either[E, O]](Right.apply))
+      endpoint.serverLogic(i => logic(i).map[Either[Unit, O]](Right.apply))
   }
 
   implicit class OurErrorHandlingEndpoint[I, E <: Throwable: ClassTag, O](
       endpoint: tapir.Endpoint[Unit, I, E, O, Any]
   ) {
-    def withLogicHandlingErrors(logic: I => F[O]): ServerEndpoint[Any, F] =
+    def withLogic(logic: I => F[O]): ServerEndpoint[Any, F] =
       endpoint.serverLogic(i => logic(i).attemptNarrow[E])
   }
 
   val possiblyGoodMorning: ServerEndpoint[Any, F] =
-    GoodMorningEndpoints.`POST /morning/v2`.withLogicHandlingErrors { request =>
+    GoodMorningEndpoints.`POST /morning/v2`.withLogic { request =>
       for {
         _ <- caffeineService.validateCaffeinated
         _ <- timeService.validateIsMorning

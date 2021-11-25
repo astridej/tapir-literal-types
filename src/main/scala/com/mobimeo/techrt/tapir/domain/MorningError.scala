@@ -16,7 +16,7 @@ sealed abstract class BaseError(val message: String)
 }
 
 abstract class MorningError[S <: String with Singleton](
-    val code: S,
+    override val code: S,
     override val message: String
 ) extends BaseError(message) {
   override type Code = S

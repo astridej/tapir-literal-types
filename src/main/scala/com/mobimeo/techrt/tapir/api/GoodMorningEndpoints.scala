@@ -46,7 +46,10 @@ object GoodMorningEndpoints extends Tapir {
     .in("v2")
     .post
     .in(jsonBody[GoodMorningRequest])
-    .out(jsonBody[GoodMorningResponse])
+    .out(
+      jsonBody[GoodMorningResponse]
+        .example(GoodMorningResponse.forName("Harry Potter"))
+    )
     .errorOut(
       oneOf(
         allow[BadWeatherError.type],

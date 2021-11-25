@@ -7,4 +7,8 @@ case class GoodMorningResponse(message: String)
 
 object GoodMorningResponse {
   implicit val codec: Codec[GoodMorningResponse] = deriveCodec
+
+  def forName(name: String): GoodMorningResponse = GoodMorningResponse(
+    s"Good morning, $name!"
+  )
 }

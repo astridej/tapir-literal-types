@@ -1,30 +1,58 @@
 package com.mobimeo.techrt.tapir.server
 
-import cats.effect.{Concurrent, ContextShift, Timer}
 import cats.implicits._
-import com.mobimeo.techrt.tapir.api.{GoodMorningEndpoints, OpenAPISupport}
+import cats.{Applicative, MonadThrow}
 import com.mobimeo.techrt.tapir.api.models.GoodMorningResponse
-import org.http4s.HttpRoutes
+import com.mobimeo.techrt.tapir.api.{GoodMorningEndpoints, OpenAPISupport}
+import com.mobimeo.techrt.tapir.domain.{
+  CaffeineService,
+  TimeService,
+  WeatherService
+}
 import sttp.tapir
-import sttp.tapir.docs.openapi.OpenAPIDocsInterpreter
-import sttp.tapir.json.circe.TapirJsonCirce
-import sttp.tapir.openapi.circe.yaml.TapirOpenAPICirceYaml
-import sttp.tapir.server.http4s.Http4sServerInterpreter
+import sttp.tapir.server.ServerEndpoint
 
-class GoodMorningRoutes[F[_] : Concurrent : ContextShift : Timer] extends TapirJsonCirce with TapirOpenAPICirceYaml with OpenAPIDocsInterpreter {
+import scala.language.postfixOps
+import scala.reflect.ClassTag
 
-  implicit class OurRoute[I, O](endpoint: tapir.Endpoint[I, Unit, O, Any]) {
-    def asBasicRoute(logic: I => F[O]): HttpRoutes[F] =
-      Http4sServerInterpreter.toRoutes(endpoint)(i => logic(i).map(Right.apply))
+class GoodMorningRoutes[F[_]: MonadThrow](
+    weatherService: WeatherService[F],
+    caffeineService: CaffeineService[F],
+    timeService: TimeService[F]
+) {
+
+  implicit class OurPlainEndpoint[I, E, O](
+      endpoint: tapir.Endpoint[Unit, I, E, O, Any]
+  ) {
+    def withLogic(logic: I => F[O]): ServerEndpoint[Any, F] =
+      endpoint.serverLogic(i => logic(i).map[Either[E, O]](Right.apply))
   }
 
-  val goodMorning: HttpRoutes[F] = GoodMorningEndpoints.`POST /morning`.asBasicRoute { request =>
-    Concurrent[F].pure(GoodMorningResponse(s"Good morning, ${request.name}!"))
+  implicit class OurErrorHandlingEndpoint[I, E <: Throwable: ClassTag, O](
+      endpoint: tapir.Endpoint[Unit, I, E, O, Any]
+  ) {
+    def withLogicHandlingErrors(logic: I => F[O]): ServerEndpoint[Any, F] =
+      endpoint.serverLogic(i => logic(i).attemptNarrow[E])
   }
 
-  val openApi: HttpRoutes[F] = GoodMorningEndpoints.`GET /openapi`.asBasicRoute { _ =>
-    Concurrent[F].pure(OpenAPISupport.openApi.toYaml)
-  }
+  val possiblyGoodMorning: ServerEndpoint[Any, F] =
+    GoodMorningEndpoints.`POST /morning/v2`.withLogicHandlingErrors { request =>
+      for {
+        _ <- caffeineService.validateCaffeinated
+        _ <- timeService.validateIsMorning
+        _ <- weatherService.validateWeather
+      } yield GoodMorningResponse.forName(request.name)
+    }
 
-  val routes = goodMorning <+> openApi
+  val goodMorning: ServerEndpoint[Any, F] =
+    GoodMorningEndpoints.`POST /morning`.withLogic { request =>
+      Applicative[F].pure(GoodMorningResponse.forName(request.name))
+    }
+
+  val openApi: ServerEndpoint[Any, F] =
+    GoodMorningEndpoints.`GET /openapi`.withLogic { _ =>
+      Applicative[F].pure(OpenAPISupport.openApiYaml)
+    }
+
+  val endpoints = List(goodMorning, possiblyGoodMorning, openApi)
 }
